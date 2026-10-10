@@ -1,30 +1,34 @@
-# using pydantic to automatically reject bad requests
-from pydantic import BaseModel, Field
-from typing import List, Optional, Dict
+from pydantic import BaseModel, Field, field_validator
+from typing import List, Optional
 
-# Input Schema
+# --- Input Schemas ---
 
 class SecurityInput(BaseModel):
-    ticker: str
-    # Field(...) makes it required, ge and le ensures the weight (keeping the non negative in mind)
-    weight: float = Field(..., ge=0, le=100) # Must be between 0 and 100%
+    ticker: str = Field(..., description="Ticker symbol of the security, e.g. 'SPY', 'AGG'")
+    weight: float = Field(..., ge=0.0, le=100.0, description="Current portfolio weight percentage [0, 100]")
 
 class Constraints(BaseModel):
-    # Optinal rules that a user can apply to the optimisation engine
-    min_weight: Optional[float] = 0.0 # Setting default to 0
-    max_weight: Optional[float] = 100.0 # Default to 100
-    min_dividend_yield: Optional[float] = None
+    min_weight: Optional[float] = Field(0.0, ge=0.0, le=100.0, description="Minimum weight constraint per security (%)")
+    max_weight: Optional[float] = Field(100.0, ge=0.0, le=100.0, description="Maximum weight constraint per security (%)")
+    min_dividend_yield: Optional[float] = Field(None, ge=0.0, description="Minimum annualized dividend yield (%)")
+    min_cagr: Optional[float] = Field(None, description="Minimum annualized return / CAGR (%)")
+    target_factor: Optional[str] = Field("momentum", description="Target factor to optimize: 'momentum', 'value', or 'size'")
 
 class OptimizationRequest(BaseModel):
-    # The incoming JSON post request
-    securities: List[SecurityInput]
-    strategy: str 
-    constraints: Optional[Constraints] = Constraints()
+    securities: List[SecurityInput] = Field(..., min_length=1, description="List of securities in the portfolio")
+    strategy: str = Field(..., description="Optimization strategy name")
+    constraints: Optional[Constraints] = Field(default_factory=Constraints, description="Optimization constraints")
 
-# Output Schema
+    @field_validator('securities')
+    def check_unique_tickers(cls, v):
+        tickers = [sec.ticker.upper().strip() for sec in v]
+        if len(tickers) != len(set(tickers)):
+            raise ValueError("Duplicate tickers are not permitted in a single portfolio.")
+        return v
+
+# --- Output Schemas ---
 
 class AllocationChange(BaseModel):
-    # A single row in the required 'Allocation Changes' response array
     ticker: str
     security_name: str
     current_weight: float
@@ -32,18 +36,15 @@ class AllocationChange(BaseModel):
     change: float
 
 class FactorBetas(BaseModel):
-    # Holds the calculate beta values for the three market forces
     value: float
     momentum: float
     size: float
 
 class BetaComparison(BaseModel):
-    # Groups the before and after beta calculations
     current_portfolio: FactorBetas
     optimized_portfolio: FactorBetas
 
 class OptimizationResponse(BaseModel):
-    # Ootgoing JSON response
     optimization_strategy: str
     allocation_changes: List[AllocationChange]
     factor_betas: Optional[BetaComparison] = None
