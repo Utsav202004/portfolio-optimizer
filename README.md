@@ -12,8 +12,8 @@ A quantitative REST API replicating the core optimization engine behind Finomina
   3. `minimize_volatility`: Lowest annualized portfolio variance using quadratic covariance form.
   4. `maximize_sharpe_ratio`: Maximum risk-adjusted return tangency portfolio.
   5. `minimize_drawdown`: Minimizes maximum historical peak-to-trough drop.
-  6. `optimize_factor_exposure` *(Bonus)*: Maximizes portfolio sensitivity ($\beta$) to equity risk factors (Momentum, Value, Size).
-- **Multi-Factor Risk Model (Bonus):** Calculates before-and-after factor betas ($\beta_{\text{val}}, \beta_{\text{mom}}, \beta_{\text{size}}$) via Ordinary Least Squares (OLS) multi-variable regression.
+  6. `optimize_factor_exposure` *(Bonus)*: Maximizes portfolio sensitivity to equity risk factors (Momentum, Value, Size).
+- **Multi-Factor Risk Model (Bonus):** Calculates before-and-after factor betas (Value, Momentum, Size) via Ordinary Least Squares (OLS) multi-variable regression.
 - **Robust Constraint Engine:** Enforces portfolio-level constraints (e.g. Min Dividend Yield, Min CAGR) and asset-level box bounds (`min_weight`, `max_weight`).
 - **Strict Infeasibility Protection:** Detects contradictory constraints upfront (e.g. impossible target yields or mutually exclusive bounds) and returns clean HTTP 400 errors instead of producing silent garbage weights.
 - **Dynamic Historical Alignment:** Intelligently extracts common date ranges only across the requested securities, preserving maximum historical depth for each portfolio combination.
@@ -55,24 +55,54 @@ Executes all 6 official assignment test scenarios plus boundary and infeasibilit
 
 ---
 
-##  Mathematical Formulation & Quant Intuition
+## 📐 Mathematical Formulation & Quant Intuition
 
 ### 1. Volatility & Covariance
-Portfolio variance is computed as the quadratic form:
-$$\sigma_p^2 = w^T \Sigma w$$
-where $w$ is the $N \times 1$ weight vector and $\Sigma$ is the $N \times N$ annualized covariance matrix ($252 \times \text{daily\_cov}$). Annualized volatility is $\sigma_p = \sqrt{w^T \Sigma w}$.
+Portfolio variance is computed using the quadratic matrix form:
+
+$$
+\sigma_p^2 = w^T \Sigma w
+$$
+
+Annualized portfolio volatility is the standard deviation:
+
+$$
+\sigma_p = \sqrt{w^T \Sigma w}
+$$
+
+where $w$ is the $N \times 1$ portfolio weight vector, and $\Sigma$ is the $N \times N$ annualized covariance matrix ($252 \times \text{daily covariance}$).
 
 ### 2. Equal Risk Contribution (Risk Parity)
-Rather than equal capital allocation, Risk Parity ensures every asset contributes equally to the total portfolio variance:
-$$\text{MCR}_i = (\Sigma w)_i \quad \text{(Marginal Contribution to Risk)}$$
-$$\text{RC}_i = w_i \cdot (\Sigma w)_i \quad \text{(Absolute Risk Contribution)}$$
-$$\text{RRC}_i = \frac{w_i (\Sigma w)_i}{w^T \Sigma w} = \frac{1}{N} \quad \text{(Relative Risk Contribution)}$$
-The objective function minimizes $\sum_{i=1}^N \left(\text{RRC}_i - \frac{1}{N}\right)^2$.
+Rather than allocating equal capital ($1/N$), Risk Parity allocates weights such that each asset contributes an equal share of the total portfolio risk:
+
+$$
+\begin{aligned}
+\text{MCR}_i &= (\Sigma w)_i && \text{-- Marginal Contribution to Risk} \\
+\text{RC}_i &= w_i \cdot (\Sigma w)_i && \text{-- Absolute Risk Contribution} \\
+\text{RRC}_i &= \frac{w_i (\Sigma w)_i}{w^T \Sigma w} = \frac{1}{N} && \text{-- Relative Risk Contribution}
+\end{aligned}
+$$
+
+The optimization engine minimizes the sum of squared deviations from the equal risk budget:
+
+$$
+\min_w \sum_{i=1}^N \left(\text{RRC}_i - \frac{1}{N}\right)^2
+$$
 
 ### 3. Factor Betas & Exposure Optimization (Bonus)
-Portfolio returns are regressed against Momentum, Value, and Size factor returns over their overlapping history:
-$$R_{\text{portfolio}, t} = \alpha + \beta_{\text{mom}} R_{\text{mom}, t} + \beta_{\text{val}} R_{\text{val}, t} + \beta_{\text{size}} R_{\text{size}, t} + \epsilon_t$$
-Using Ordinary Least Squares (OLS) via `np.linalg.lstsq`. For Momentum optimization, the engine maximizes $\beta_{\text{mom}} = \sum w_i \beta_{i, \text{mom}}$ subject to weights and constraints.
+Portfolio daily returns are regressed against Momentum, Value, and Size factor returns over their common historical date range:
+
+$$
+R_{\text{portfolio}, t} = \alpha + \beta_{\text{mom}} R_{\text{mom}, t} + \beta_{\text{val}} R_{\text{val}, t} + \beta_{\text{size}} R_{\text{size}, t} + \epsilon_t
+$$
+
+We solve for the factor loadings using Ordinary Least Squares (OLS) multi-variable regression via `np.linalg.lstsq`. For Momentum optimization, the engine maximizes portfolio momentum exposure:
+
+$$
+\max_w \beta_{\text{mom}} = \sum_{i=1}^N w_i \beta_{i, \text{mom}}
+$$
+
+subject to portfolio weights and user-specified constraints.
 
 ---
 
